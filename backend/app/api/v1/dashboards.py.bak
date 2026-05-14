@@ -1,0 +1,53 @@
+from typing import Optional
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from app.core.db import get_db
+from app.api.deps import get_current_user
+from app.models import User
+from app.services.dashboards import (
+    get_executive_overview, get_country_detail, get_state_overview, get_sector_detail,
+)
+from app.schemas.dashboards import (
+    ExecutiveOverview, CountryDetail, StateOverview, SectorDetail,
+)
+
+router = APIRouter(prefix="/dashboards", tags=["dashboards"])
+
+
+@router.get("/executive", response_model=ExecutiveOverview)
+def executive(
+    fiscal_year: Optional[int] = Query(None, ge=2010, le=2100),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    return get_executive_overview(db, fiscal_year)
+
+
+@router.get("/country/{iso3}", response_model=CountryDetail)
+def country(
+    iso3: str,
+    fiscal_year: Optional[int] = Query(None, ge=2010, le=2100),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    return get_country_detail(db, iso3, fiscal_year)
+
+
+@router.get("/states", response_model=StateOverview)
+def states(
+    fiscal_year: Optional[int] = Query(None, ge=2010, le=2100),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    return get_state_overview(db, fiscal_year)
+
+
+@router.get("/sector/{hs_2}", response_model=SectorDetail)
+def sector(
+    hs_2: str,
+    fiscal_year: Optional[int] = Query(None, ge=2010, le=2100),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    return get_sector_detail(db, hs_2, fiscal_year)

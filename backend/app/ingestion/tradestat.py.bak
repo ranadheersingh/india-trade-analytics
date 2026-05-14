@@ -1,0 +1,239 @@
+"""
+TRADESTAT Pipeline - PRODUCTION VERSION
+- Loads CSV files from app/data/tradestat/
+- Converts Million USD → USD (× 1,000,000)
+- Distributes zone-level data across states
+- Handles multiple years per file
+"""
+import logging
+import re
+import csv
+from datetime import date
+from pathlib import Path
+from typing import Dict, List, Optional
+
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import Session
+
+from app.ingestion.base import Pipeline
+from app.models import DimState, DimHsCode, FactTradeMonthly
+
+logger = logging.getLogger(__name__)
+
+DATA_DIR = Path("app/data/tradestat")
+
+# Distribute data across all Indian states (TRADESTAT shows zones, we map to states)
+ALL_INDIAN_STATES = [
+    "Delhi", "Haryana", "Punjab", "Himachal Pradesh", "Jammu and Kashmir",
+    "Ladakh", "Uttarakhand", "Uttar Pradesh", "Rajasthan", "Gujarat",
+    "Daman and Diu", "Dadra and Nagar Haveli", "Maharashtra", "Goa",
+    "Karnataka", "Andhra Pradesh", "Telangana", "Tamil Nadu", "Kerala",
+    "Puducherry", "Andaman and Nicobar", "Lakshadweep", "Odisha",
+    "Jharkhand", "West Bengal", "Sikkim", "Arunachal Pradesh", "Assam",
+    "Meghalaya", "Manipur", "Mizoram", "Nagaland", "Tripura",
+    "Bihar", "Madhya Pradesh", "Chhattisgarh"
+]
+
+# Convert TRADESTAT values (US$ Million) to USD
+USD_MULTIPLIER = 1_000_000
+
+
+class TradestatPipeline(Pipeline):
+    name = "tradestat"
+    schedule_cron = "0 5 * * *"
+    
+    async def fetch(self, db: Session) -> list[dict]:
+        logger.info("[tradestat] ========== STARTING ==========")
+        
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            
+            export_files = list(DATA_DIR.glob("export_*.csv"))
+            import_files = list(DATA_DIR.glob("import_*.csv"))
+            
+            logger.info("[tradestat] Files: exports=%d, imports=%d",
+                       len(export_files), len(import_files))
+            
+            if not export_files and not import_files:
+                logger.warning("[tradestat] NO CSV FILES FOUND in %s", DATA_DIR.absolute())
+                return []
+            
+            states = self._load_states(db)
+            hs_codes = self._load_hs_codes(db)
+            
+            logger.info("[tradestat] Loaded %d states, %d HS codes",
+                       len(states), len(hs_codes))
+            
+            # Clear ALL existing TRADESTAT data first
+            db.execute(text("DELETE FROM dw.fact_trade_monthly WHERE source_system = 'TRADESTAT'"))
+            db.commit()
+            logger.info("[tradestat] Cleared existing TRADESTAT data")
+            
+            total_loaded = 0
+            
+            # Process EXPORT files
+            for fpath in sorted(export_files):
+                logger.info("[tradestat] === EXPORT: %s ===", fpath.name)
+                try:
+                    rows = self._parse_csv(fpath, "EXPORT", states, hs_codes)
+                    if rows:
+                        loaded = self._insert_rows(db, rows)
+                        total_loaded += loaded
+                        logger.info("[tradestat] ✅ Loaded %d EXPORT rows", loaded)
+                except Exception as e:
+                    logger.error("[tradestat] ❌ Failed: %s", e, exc_info=True)
+            
+            # Process IMPORT files
+            for fpath in sorted(import_files):
+                logger.info("[tradestat] === IMPORT: %s ===", fpath.name)
+                try:
+                    rows = self._parse_csv(fpath, "IMPORT", states, hs_codes)
+                    if rows:
+                        loaded = self._insert_rows(db, rows)
+                        total_loaded += loaded
+                        logger.info("[tradestat] ✅ Loaded %d IMPORT rows", loaded)
+                except Exception as e:
+                    logger.error("[tradestat] ❌ Failed: %s", e, exc_info=True)
+            
+            logger.info("[tradestat] ========== COMPLETE: %d total rows ==========", total_loaded)
+            return []
+        except Exception as e:
+            logger.error("[tradestat] PIPELINE FAILED: %s", e, exc_info=True)
+            raise
+
+    def _parse_csv(self, fpath: Path, direction: str,
+                   states: Dict[str, int], hs_codes: Dict[str, int]) -> List[Dict]:
+        rows = []
+        today_key = int(date.today().strftime("%Y%m%d"))
+        skipped_no_hs = 0
+        
+        with open(fpath, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            
+            if not reader.fieldnames:
+                logger.error("[tradestat] No headers in %s", fpath.name)
+                return []
+            
+            year_columns = [col for col in reader.fieldnames
+                          if self._is_year_column(col)]
+            logger.info("[tradestat] Year columns: %s", year_columns)
+            
+            if not year_columns:
+                return []
+            
+            for row_idx, record in enumerate(reader):
+                try:
+                    hs_raw = str(record.get("HSCode", "")).strip()
+                    if not hs_raw or hs_raw.lower() == "nan":
+                        skipped_no_hs += 1
+                        continue
+                    
+                    hs_code = hs_raw.zfill(2)[:2]
+                    hs_code_key = hs_codes.get(hs_code)
+                    
+                    if not hs_code_key:
+                        skipped_no_hs += 1
+                        continue
+                    
+                    for year_col in year_columns:
+                        value_str = str(record.get(year_col, "")).strip()
+                        if not value_str or value_str.lower() == "nan":
+                            continue
+                        
+                        try:
+                            value_million = float(
+                                value_str.replace(",", "").replace(" ", "")
+                            )
+                        except ValueError:
+                            continue
+                        
+                        if value_million <= 0:
+                            continue
+                        
+                        # Convert Million USD → USD
+                        value_usd = value_million * USD_MULTIPLIER
+                        
+                        year = self._extract_year_from_column(year_col)
+                        if not year:
+                            continue
+                        
+                        d_key = int(f"{year:04d}0101")
+                        
+                        # Distribute equally across all 36 states
+                        value_per_state = value_usd / len(ALL_INDIAN_STATES)
+                        
+                        for state_name in ALL_INDIAN_STATES:
+                            state_key = states.get(state_name.upper())
+                            if not state_key:
+                                continue
+                            
+                            rows.append({
+                                "date_key": d_key,
+                                "direction": direction,
+                                "hs_code_key": hs_code_key,
+                                "country_key": 1,  # India
+                                "state_key": state_key,
+                                "value_usd": value_per_state,
+                                "quantity": None,
+                                "quantity_kg": None,
+                                "n_shipments": None,
+                                "source_system": "TRADESTAT",
+                                "is_provisional": False,
+                                "extract_date_key": today_key,
+                            })
+                except Exception as e:
+                    logger.debug("[tradestat] Row %d error: %s", row_idx, e)
+        
+        logger.info("[tradestat] Parsed: %d rows from %s (skipped %d)",
+                   len(rows), fpath.name, skipped_no_hs)
+        return rows
+
+    def _is_year_column(self, col_name: str) -> bool:
+        return bool(re.match(r'^\d{4}-\d{2,4}$', str(col_name).strip()))
+
+    def _extract_year_from_column(self, col_name: str) -> Optional[int]:
+        match = re.match(r'^(\d{4})-\d{2,4}$', str(col_name).strip())
+        return int(match.group(1)) if match else None
+
+    def _load_states(self, db: Session) -> Dict[str, int]:
+        states = {}
+        for s in db.execute(select(DimState)).scalars():
+            states[s.state_name.upper()] = s.state_key
+        return states
+
+    def _load_hs_codes(self, db: Session) -> Dict[str, int]:
+        hs_codes = {}
+        for h in db.execute(select(DimHsCode)).scalars():
+            if not h.hs_code:
+                continue
+            code_2digit = str(h.hs_code).zfill(2)[:2]
+            if code_2digit not in hs_codes:
+                hs_codes[code_2digit] = h.hs_code_key
+        return hs_codes
+
+    def _insert_rows(self, db: Session, rows: List[Dict]) -> int:
+        if not rows:
+            return 0
+        
+        batch_size = 1000
+        total = 0
+        
+        for i in range(0, len(rows), batch_size):
+            batch = rows[i:i+batch_size]
+            try:
+                db.execute(pg_insert(FactTradeMonthly).values(batch))
+                db.commit()
+                total += len(batch)
+            except Exception as e:
+                db.rollback()
+                logger.error("[tradestat] Batch insert failed: %s", e)
+                raise
+        
+        return total
+
+    async def transform(self, db, raw):
+        return []
+
+    async def load(self, db, rows):
+        return 0

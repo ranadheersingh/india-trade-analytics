@@ -1,0 +1,45 @@
+[project]
+name = "india-trade-backend"
+version = "1.0.0"
+description = "India Trade Analytics — backend"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "sqlalchemy==2.0.36",
+    "psycopg[binary]==3.2.3",
+    "alembic==1.14.0",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.1",
+    "python-jose[cryptography]==3.3.0",
+    "passlib[argon2]==1.7.4",
+    "python-multipart==0.0.20",
+    "httpx==0.28.1",
+    "apscheduler==3.11.0",
+    "tenacity==9.0.0",
+    "slowapi==0.1.9",
+    "email-validator==2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.0",
+    "pytest-cov==6.0.0",
+    "ruff==0.8.4",
+    "black==24.10.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

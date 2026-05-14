@@ -1,0 +1,59 @@
+from pydantic import BaseModel
+from typing import List, Optional
+
+
+class KpiCard(BaseModel):
+    label: str
+    value: float
+    unit: str = "USD"
+    yoy_change: Optional[float] = None
+    yoy_pct: Optional[float] = None
+
+
+class TimeSeriesPoint(BaseModel):
+    period: str  # 'YYYY-MM' or 'YYYY'
+    value: float
+    direction: Optional[str] = None
+
+
+class CategoryValue(BaseModel):
+    label: str
+    code: Optional[str] = None
+    value: float
+    pct_of_total: Optional[float] = None
+
+
+class ExecutiveOverview(BaseModel):
+    fiscal_year: int
+    kpis: List[KpiCard]
+    monthly_trend: List[TimeSeriesPoint]
+    top_partners_export: List[CategoryValue]
+    top_partners_import: List[CategoryValue]
+    top_categories_export: List[CategoryValue]
+    top_categories_import: List[CategoryValue]
+    region_split_export: List[CategoryValue]
+
+
+class CountryDetail(BaseModel):
+    country: dict
+    fiscal_year: int
+    kpis: List[KpiCard]
+    monthly_trend: List[TimeSeriesPoint]
+    top_export_products: List[CategoryValue]
+    top_import_products: List[CategoryValue]
+
+
+class StateOverview(BaseModel):
+    fiscal_year: int
+    states: List[CategoryValue]
+
+
+class SectorDetail(BaseModel):
+    hs_2: str
+    hs_2_name: str
+    fiscal_year: int
+    kpis: List[KpiCard]
+    monthly_trend: List[TimeSeriesPoint]
+    top_export_destinations: List[CategoryValue]
+    top_import_sources: List[CategoryValue]
+    hs4_breakdown: List[CategoryValue]

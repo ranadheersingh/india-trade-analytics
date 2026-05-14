@@ -1,0 +1,411 @@
+"""Dashboard service: SQL aggregations producing the data the UI charts need."""
+from typing import Optional
+from sqlalchemy.orm import Session
+from sqlalchemy import select, func, and_, desc
+from fastapi import HTTPException, status
+
+from app.models import (
+    FactTradeMonthly, DimDate, DimCountry, DimState, DimHsCode,
+)
+from app.schemas.dashboards import (
+    ExecutiveOverview, CountryDetail, StateOverview, SectorDetail,
+    KpiCard, TimeSeriesPoint, CategoryValue,
+)
+
+
+def _current_fy() -> int:
+    from datetime import date
+    today = date.today()
+    return today.year + 1 if today.month >= 4 else today.year
+
+
+def _kpi_pair(value_curr: float, value_prev: float, label: str) -> KpiCard:
+    yoy = value_curr - value_prev
+    pct = (yoy / value_prev) if value_prev else None
+    return KpiCard(label=label, value=float(value_curr or 0), yoy_change=float(yoy or 0), yoy_pct=float(pct) if pct is not None else None)
+
+
+def get_executive_overview(db: Session, fiscal_year: Optional[int] = None) -> ExecutiveOverview:
+    fy = fiscal_year or _current_fy()
+    fy_prev = fy - 1
+
+    # ---- Total exports / imports for FY and FY-1 ----
+    def total_value(direction: str, year: int) -> float:
+        return db.execute(
+            select(func.coalesce(func.sum(FactTradeMonthly.value_usd), 0))
+            .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+            .where(
+                FactTradeMonthly.direction == direction,
+                DimDate.fiscal_year_in == year,
+            )
+        ).scalar_one() or 0
+
+    exp_curr = float(total_value("EXPORT", fy))
+    imp_curr = float(total_value("IMPORT", fy))
+    exp_prev = float(total_value("EXPORT", fy_prev))
+    imp_prev = float(total_value("IMPORT", fy_prev))
+
+    kpis = [
+        _kpi_pair(exp_curr, exp_prev, "Total Exports (FYTD)"),
+        _kpi_pair(imp_curr, imp_prev, "Total Imports (FYTD)"),
+        _kpi_pair(exp_curr - imp_curr, exp_prev - imp_prev, "Trade Balance"),
+        _kpi_pair(exp_curr + imp_curr, exp_prev + imp_prev, "Total Trade"),
+    ]
+
+    # ---- Monthly trend, last 12 months by fiscal_month_in for fy ----
+    rows = db.execute(
+        select(
+            DimDate.fiscal_year_in,
+            DimDate.month_num,
+            DimDate.calendar_year,
+            FactTradeMonthly.direction,
+            func.sum(FactTradeMonthly.value_usd).label("v"),
+        )
+        .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+        .where(DimDate.fiscal_year_in == fy)
+        .group_by(DimDate.fiscal_year_in, DimDate.month_num, DimDate.calendar_year, FactTradeMonthly.direction)
+        .order_by(DimDate.calendar_year, DimDate.month_num)
+    ).all()
+
+    monthly = [
+        TimeSeriesPoint(
+            period=f"{r.calendar_year}-{r.month_num:02d}",
+            value=float(r.v or 0),
+            direction=r.direction,
+        )
+        for r in rows
+    ]
+
+    # ---- Top partner countries: exports & imports ----
+    def top_countries(direction: str, n: int = 10) -> list[CategoryValue]:
+        rows = db.execute(
+            select(
+                DimCountry.iso_alpha_3,
+                DimCountry.country_name,
+                func.sum(FactTradeMonthly.value_usd).label("v"),
+            )
+            .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+            .join(DimCountry, FactTradeMonthly.country_key == DimCountry.country_key)
+            .where(
+                DimDate.fiscal_year_in == fy,
+                FactTradeMonthly.direction == direction,
+            )
+            .group_by(DimCountry.iso_alpha_3, DimCountry.country_name)
+            .order_by(desc("v"))
+            .limit(n)
+        ).all()
+        total = sum(float(r.v or 0) for r in rows) or 1
+        return [
+            CategoryValue(
+                label=r.country_name,
+                code=r.iso_alpha_3,
+                value=float(r.v or 0),
+                pct_of_total=float(r.v or 0) / total,
+            )
+            for r in rows
+        ]
+
+    top_part_exp = top_countries("EXPORT")
+    top_part_imp = top_countries("IMPORT")
+
+    # ---- Top categories (HS-2) ----
+    def top_categories(direction: str, n: int = 10) -> list[CategoryValue]:
+        rows = db.execute(
+            select(
+                DimHsCode.hs_2,
+                DimHsCode.description,
+                func.sum(FactTradeMonthly.value_usd).label("v"),
+            )
+            .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+            .join(DimHsCode, FactTradeMonthly.hs_code_key == DimHsCode.hs_code_key)
+            .where(
+                DimDate.fiscal_year_in == fy,
+                FactTradeMonthly.direction == direction,
+            )
+            .group_by(DimHsCode.hs_2, DimHsCode.description)
+            .order_by(desc("v"))
+            .limit(n)
+        ).all()
+        total = sum(float(r.v or 0) for r in rows) or 1
+        return [
+            CategoryValue(
+                label=f"{r.hs_2} — {r.description[:60]}",
+                code=r.hs_2,
+                value=float(r.v or 0),
+                pct_of_total=float(r.v or 0) / total,
+            )
+            for r in rows
+        ]
+
+    top_cat_exp = top_categories("EXPORT")
+    top_cat_imp = top_categories("IMPORT")
+
+    # ---- Region split (exports) ----
+    rows = db.execute(
+        select(
+            DimCountry.region,
+            func.sum(FactTradeMonthly.value_usd).label("v"),
+        )
+        .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+        .join(DimCountry, FactTradeMonthly.country_key == DimCountry.country_key)
+        .where(
+            DimDate.fiscal_year_in == fy,
+            FactTradeMonthly.direction == "EXPORT",
+        )
+        .group_by(DimCountry.region)
+        .order_by(desc("v"))
+    ).all()
+    total_exp = sum(float(r.v or 0) for r in rows) or 1
+    region_split = [
+        CategoryValue(
+            label=r.region or "Unknown",
+            value=float(r.v or 0),
+            pct_of_total=float(r.v or 0) / total_exp,
+        )
+        for r in rows
+    ]
+
+    return ExecutiveOverview(
+        fiscal_year=fy,
+        kpis=kpis,
+        monthly_trend=monthly,
+        top_partners_export=top_part_exp,
+        top_partners_import=top_part_imp,
+        top_categories_export=top_cat_exp,
+        top_categories_import=top_cat_imp,
+        region_split_export=region_split,
+    )
+
+
+def get_country_detail(db: Session, iso3: str, fiscal_year: Optional[int] = None) -> CountryDetail:
+    fy = fiscal_year or _current_fy()
+    fy_prev = fy - 1
+
+    country = db.execute(
+        select(DimCountry).where(DimCountry.iso_alpha_3 == iso3.upper())
+    ).scalar_one_or_none()
+    if not country:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Country not found")
+
+    def total_with_country(direction: str, year: int) -> float:
+        return db.execute(
+            select(func.coalesce(func.sum(FactTradeMonthly.value_usd), 0))
+            .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+            .where(
+                FactTradeMonthly.direction == direction,
+                FactTradeMonthly.country_key == country.country_key,
+                DimDate.fiscal_year_in == year,
+            )
+        ).scalar_one() or 0
+
+    exp_curr = float(total_with_country("EXPORT", fy))
+    imp_curr = float(total_with_country("IMPORT", fy))
+    exp_prev = float(total_with_country("EXPORT", fy_prev))
+    imp_prev = float(total_with_country("IMPORT", fy_prev))
+
+    kpis = [
+        _kpi_pair(exp_curr, exp_prev, f"Exports to {country.country_name}"),
+        _kpi_pair(imp_curr, imp_prev, f"Imports from {country.country_name}"),
+        _kpi_pair(exp_curr - imp_curr, exp_prev - imp_prev, "Trade Balance"),
+        _kpi_pair(exp_curr + imp_curr, exp_prev + imp_prev, "Total Trade"),
+    ]
+
+    # Monthly trend, last 5 FYs
+    rows = db.execute(
+        select(
+            DimDate.calendar_year,
+            DimDate.month_num,
+            FactTradeMonthly.direction,
+            func.sum(FactTradeMonthly.value_usd).label("v"),
+        )
+        .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+        .where(
+            FactTradeMonthly.country_key == country.country_key,
+            DimDate.fiscal_year_in.between(fy - 4, fy),
+        )
+        .group_by(DimDate.calendar_year, DimDate.month_num, FactTradeMonthly.direction)
+        .order_by(DimDate.calendar_year, DimDate.month_num)
+    ).all()
+    monthly = [
+        TimeSeriesPoint(
+            period=f"{r.calendar_year}-{r.month_num:02d}",
+            value=float(r.v or 0),
+            direction=r.direction,
+        )
+        for r in rows
+    ]
+
+    # Top products
+    def top_products(direction: str, n: int = 10) -> list[CategoryValue]:
+        rows = db.execute(
+            select(
+                DimHsCode.hs_2,
+                DimHsCode.description,
+                func.sum(FactTradeMonthly.value_usd).label("v"),
+            )
+            .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+            .join(DimHsCode, FactTradeMonthly.hs_code_key == DimHsCode.hs_code_key)
+            .where(
+                FactTradeMonthly.country_key == country.country_key,
+                FactTradeMonthly.direction == direction,
+                DimDate.fiscal_year_in == fy,
+            )
+            .group_by(DimHsCode.hs_2, DimHsCode.description)
+            .order_by(desc("v"))
+            .limit(n)
+        ).all()
+        total = sum(float(r.v or 0) for r in rows) or 1
+        return [
+            CategoryValue(
+                label=f"{r.hs_2} — {r.description[:60]}",
+                code=r.hs_2,
+                value=float(r.v or 0),
+                pct_of_total=float(r.v or 0) / total,
+            )
+            for r in rows
+        ]
+
+    return CountryDetail(
+        country={
+            "iso_alpha_3": country.iso_alpha_3,
+            "iso_alpha_2": country.iso_alpha_2,
+            "country_name": country.country_name,
+            "region": country.region,
+            "continent": country.continent,
+        },
+        fiscal_year=fy,
+        kpis=kpis,
+        monthly_trend=monthly,
+        top_export_products=top_products("EXPORT"),
+        top_import_products=top_products("IMPORT"),
+    )
+
+
+def get_state_overview(db: Session, fiscal_year: Optional[int] = None) -> StateOverview:
+    fy = fiscal_year or _current_fy()
+
+    rows = db.execute(
+        select(
+            DimState.state_code,
+            DimState.state_name,
+            func.sum(FactTradeMonthly.value_usd).label("v"),
+        )
+        .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+        .join(DimState, FactTradeMonthly.state_key == DimState.state_key)
+        .where(
+            DimDate.fiscal_year_in == fy,
+            FactTradeMonthly.direction == "EXPORT",
+        )
+        .group_by(DimState.state_code, DimState.state_name)
+        .order_by(desc("v"))
+    ).all()
+    total = sum(float(r.v or 0) for r in rows) or 1
+    states = [
+        CategoryValue(
+            label=r.state_name,
+            code=r.state_code,
+            value=float(r.v or 0),
+            pct_of_total=float(r.v or 0) / total,
+        )
+        for r in rows
+    ]
+    return StateOverview(fiscal_year=fy, states=states)
+
+
+def get_sector_detail(db: Session, hs_2: str, fiscal_year: Optional[int] = None) -> SectorDetail:
+    fy = fiscal_year or _current_fy()
+    fy_prev = fy - 1
+
+    hs_row = db.execute(
+        select(DimHsCode).where(DimHsCode.hs_2 == hs_2, DimHsCode.hs_level == 2, DimHsCode.is_current == True)
+    ).scalar_one_or_none()
+    if not hs_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="HS-2 code not found")
+
+    def total_for_hs(direction: str, year: int) -> float:
+        return db.execute(
+            select(func.coalesce(func.sum(FactTradeMonthly.value_usd), 0))
+            .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+            .join(DimHsCode, FactTradeMonthly.hs_code_key == DimHsCode.hs_code_key)
+            .where(
+                DimHsCode.hs_2 == hs_2,
+                FactTradeMonthly.direction == direction,
+                DimDate.fiscal_year_in == year,
+            )
+        ).scalar_one() or 0
+
+    exp_curr = float(total_for_hs("EXPORT", fy))
+    imp_curr = float(total_for_hs("IMPORT", fy))
+    exp_prev = float(total_for_hs("EXPORT", fy_prev))
+    imp_prev = float(total_for_hs("IMPORT", fy_prev))
+
+    kpis = [
+        _kpi_pair(exp_curr, exp_prev, "Exports"),
+        _kpi_pair(imp_curr, imp_prev, "Imports"),
+        _kpi_pair(exp_curr - imp_curr, exp_prev - imp_prev, "Trade Balance"),
+    ]
+
+    # Monthly trend over 5 FYs
+    rows = db.execute(
+        select(
+            DimDate.calendar_year,
+            DimDate.month_num,
+            FactTradeMonthly.direction,
+            func.sum(FactTradeMonthly.value_usd).label("v"),
+        )
+        .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+        .join(DimHsCode, FactTradeMonthly.hs_code_key == DimHsCode.hs_code_key)
+        .where(
+            DimHsCode.hs_2 == hs_2,
+            DimDate.fiscal_year_in.between(fy - 4, fy),
+        )
+        .group_by(DimDate.calendar_year, DimDate.month_num, FactTradeMonthly.direction)
+        .order_by(DimDate.calendar_year, DimDate.month_num)
+    ).all()
+    monthly = [
+        TimeSeriesPoint(
+            period=f"{r.calendar_year}-{r.month_num:02d}",
+            value=float(r.v or 0),
+            direction=r.direction,
+        )
+        for r in rows
+    ]
+
+    def top_dest(direction: str, n: int = 10) -> list[CategoryValue]:
+        rows = db.execute(
+            select(
+                DimCountry.iso_alpha_3,
+                DimCountry.country_name,
+                func.sum(FactTradeMonthly.value_usd).label("v"),
+            )
+            .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+            .join(DimHsCode, FactTradeMonthly.hs_code_key == DimHsCode.hs_code_key)
+            .join(DimCountry, FactTradeMonthly.country_key == DimCountry.country_key)
+            .where(
+                DimHsCode.hs_2 == hs_2,
+                FactTradeMonthly.direction == direction,
+                DimDate.fiscal_year_in == fy,
+            )
+            .group_by(DimCountry.iso_alpha_3, DimCountry.country_name)
+            .order_by(desc("v"))
+            .limit(n)
+        ).all()
+        total = sum(float(r.v or 0) for r in rows) or 1
+        return [
+            CategoryValue(
+                label=r.country_name, code=r.iso_alpha_3,
+                value=float(r.v or 0), pct_of_total=float(r.v or 0) / total,
+            )
+            for r in rows
+        ]
+
+    return SectorDetail(
+        hs_2=hs_2,
+        hs_2_name=hs_row.description,
+        fiscal_year=fy,
+        kpis=kpis,
+        monthly_trend=monthly,
+        top_export_destinations=top_dest("EXPORT"),
+        top_import_sources=top_dest("IMPORT"),
+        hs4_breakdown=[],  # placeholder for HS-4 data when ingested
+    )

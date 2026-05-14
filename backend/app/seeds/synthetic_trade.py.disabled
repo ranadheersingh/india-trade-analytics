@@ -1,0 +1,187 @@
+"""Generate plausible synthetic trade data so dashboards have something to show.
+
+This is for validation/demo. Do not run in production.
+"""
+import random
+from datetime import date
+from sqlalchemy import select, text, delete
+from app.core.db import SessionLocal
+from app.models import (
+    DimCountry, DimHsCode, DimState, DimDate, FactTradeMonthly,
+)
+
+random.seed(42)
+
+
+def generate_synthetic_trade(
+    fy_start: int = 2022,  # FY22 = 2021-04 to 2022-03
+    fy_end: int = 2026,    # FY26 = 2025-04 to 2026-03
+    top_n_countries: int = 20,
+    top_n_states: int = 15,
+):
+    db = SessionLocal()
+    try:
+        # Wipe existing synthetic data so this is idempotent
+        db.execute(delete(FactTradeMonthly).where(FactTradeMonthly.source_system == "SYNTHETIC"))
+        db.commit()
+
+        countries = list(db.execute(
+            select(DimCountry).where(DimCountry.iso_alpha_3 != "IND").order_by(DimCountry.country_name)
+        ).scalars())[:top_n_countries]
+        states = list(db.execute(select(DimState).order_by(DimState.state_name)).scalars())[:top_n_states]
+        hs_codes = list(db.execute(
+            select(DimHsCode).where(DimHsCode.hs_level == 2, DimHsCode.is_current == True).order_by(DimHsCode.hs_code)
+        ).scalars())
+
+        # Generate per-country baseline export and import volumes
+        country_baselines = {}
+        for c in countries:
+            base_exp = random.uniform(0.5e9, 50e9)
+            base_imp = random.uniform(0.5e9, 60e9)
+            country_baselines[c.country_key] = (base_exp, base_imp)
+
+        # State weights — Maharashtra/Gujarat/TN dominate
+        state_weights = {}
+        for s in states:
+            if s.state_name in ("Maharashtra",):
+                w = 0.20
+            elif s.state_name in ("Gujarat",):
+                w = 0.18
+            elif s.state_name in ("Tamil Nadu",):
+                w = 0.12
+            elif s.state_name in ("Karnataka", "Uttar Pradesh"):
+                w = 0.07
+            elif s.is_coastal:
+                w = 0.04
+            else:
+                w = 0.02
+            state_weights[s.state_key] = w
+        total_w = sum(state_weights.values())
+        state_weights = {k: v / total_w for k, v in state_weights.items()}
+
+        # HS-2 weights — bias to top sectors
+        hs_priority = {
+            "27": 0.18,  # Mineral fuels
+            "71": 0.12,  # Pearls/jewellery
+            "84": 0.10,  # Machinery
+            "85": 0.09,  # Electrical
+            "30": 0.08,  # Pharma
+            "29": 0.06,  # Organic chemicals
+            "87": 0.05,  # Vehicles
+            "72": 0.04,  # Iron/steel
+            "10": 0.04,  # Cereals
+            "03": 0.03,  # Fish
+            "62": 0.03,  # Apparel
+            "61": 0.03,  # Knitwear
+        }
+        hs_weights = {}
+        remaining = 1 - sum(hs_priority.values())
+        per_other = remaining / max(1, (len(hs_codes) - len(hs_priority)))
+        for h in hs_codes:
+            hs_weights[h.hs_code_key] = hs_priority.get(h.hs_code, per_other)
+
+        # Build month list per fiscal year
+        rows = []
+        today_key = int(date.today().strftime("%Y%m%d"))
+        for fy in range(fy_start, fy_end + 1):
+            # FY months: Apr (fy-1) → Mar (fy)
+            months = []
+            for cy_year, cy_month in [(fy - 1, 4), (fy - 1, 5), (fy - 1, 6), (fy - 1, 7),
+                                       (fy - 1, 8), (fy - 1, 9), (fy - 1, 10), (fy - 1, 11),
+                                       (fy - 1, 12), (fy, 1), (fy, 2), (fy, 3)]:
+                # Use month-end (28 for safety) — actually use day 1 since all monthly data is reported at month start
+                months.append((cy_year, cy_month))
+
+            # FY-level growth: 5-12% per year
+            growth_factor = 1.0 + (fy - fy_start) * random.uniform(0.05, 0.10)
+
+            for c in countries:
+                base_exp, base_imp = country_baselines[c.country_key]
+                annual_exp = base_exp * growth_factor * random.uniform(0.85, 1.15)
+                annual_imp = base_imp * growth_factor * random.uniform(0.85, 1.15)
+
+                for h in hs_codes:
+                    hw = hs_weights[h.hs_code_key]
+                    if hw < 0.005 and random.random() < 0.5:
+                        continue  # sparsify
+
+                    sector_exp_annual = annual_exp * hw * random.uniform(0.7, 1.3)
+                    sector_imp_annual = annual_imp * hw * random.uniform(0.7, 1.3)
+
+                    # Distribute across 12 months with some seasonality
+                    for i, (cy_year, cy_month) in enumerate(months):
+                        seasonality = 1.0 + 0.15 * random.uniform(-1, 1)
+                        # Use last day of month for date_key
+                        if cy_month == 2:
+                            day = 28
+                        elif cy_month in (4, 6, 9, 11):
+                            day = 30
+                        else:
+                            day = 31
+                        d_key = int(f"{cy_year}{cy_month:02d}{day:02d}")
+
+                        # Pick a state for the export side; imports don't have state
+                        state_key = random.choices(
+                            list(state_weights.keys()),
+                            weights=list(state_weights.values()),
+                            k=1,
+                        )[0]
+
+                        v_exp = (sector_exp_annual / 12) * seasonality
+                        v_imp = (sector_imp_annual / 12) * seasonality
+
+                        if v_exp > 1000:
+                            rows.append({
+                                "date_key": d_key,
+                                "direction": "EXPORT",
+                                "hs_code_key": h.hs_code_key,
+                                "country_key": c.country_key,
+                                "state_key": state_key,
+                                "value_usd": round(v_exp, 2),
+                                "quantity": None,
+                                "quantity_kg": None,
+                                "n_shipments": None,
+                                "source_system": "SYNTHETIC",
+                                "is_provisional": False,
+                                "extract_date_key": today_key,
+                            })
+                        if v_imp > 1000:
+                            rows.append({
+                                "date_key": d_key,
+                                "direction": "IMPORT",
+                                "hs_code_key": h.hs_code_key,
+                                "country_key": c.country_key,
+                                "state_key": None,
+                                "value_usd": round(v_imp, 2),
+                                "quantity": None,
+                                "quantity_kg": None,
+                                "n_shipments": None,
+                                "source_system": "SYNTHETIC",
+                                "is_provisional": False,
+                                "extract_date_key": today_key,
+                            })
+
+        # Filter to date_keys that actually exist in dim_date
+        existing_keys = {k for (k,) in db.execute(text("SELECT date_key FROM dw.dim_date"))}
+        valid = [r for r in rows if r["date_key"] in existing_keys]
+        print(f"Generated {len(valid)} fact_trade_monthly rows (after filter from {len(rows)})")
+
+        # Bulk insert in chunks
+        BATCH = 5000
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        for i in range(0, len(valid), BATCH):
+            chunk = valid[i:i + BATCH]
+            stmt = pg_insert(FactTradeMonthly).values(chunk)
+            stmt = stmt.on_conflict_do_nothing(constraint="uq_trade_monthly")
+            db.execute(stmt)
+            db.commit()
+        print(f"Inserted {len(valid)} rows into fact_trade_monthly")
+
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    generate_synthetic_trade()
