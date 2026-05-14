@@ -37,10 +37,10 @@ async def lifespan(app: FastAPI):
     # Start scheduler
     scheduler = start_scheduler()
     if scheduler:
-        scheduler.start()
-    
+        logger.info("Scheduler initialized")
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down India Trade Analytics backend…")
     stop_scheduler()
@@ -71,6 +71,46 @@ app.add_middleware(
 # ============================================================================
 # INCLUDE ROUTERS
 # ============================================================================
+
+# Auth routes
+try:
+    from app.api.v1.auth import router as auth_router
+    app.include_router(auth_router, prefix="/api/v1")
+    logger.info("✅ Auth routes registered")
+except ImportError as e:
+    logger.warning(f"Auth routes not available: {e}")
+except Exception as e:
+    logger.warning(f"Error registering auth routes: {e}")
+
+# Meta routes
+try:
+    from app.api.v1.meta import router as meta_router
+    app.include_router(meta_router, prefix="/api/v1")
+    logger.info("✅ Meta routes registered")
+except ImportError as e:
+    logger.warning(f"Meta routes not available: {e}")
+except Exception as e:
+    logger.warning(f"Error registering meta routes: {e}")
+
+# Admin routes
+try:
+    from app.api.v1.admin import router as admin_router
+    app.include_router(admin_router, prefix="/api/v1")
+    logger.info("✅ Admin routes registered")
+except ImportError as e:
+    logger.warning(f"Admin routes not available: {e}")
+except Exception as e:
+    logger.warning(f"Error registering admin routes: {e}")
+
+# Dashboard routes
+try:
+    from app.api.v1.dashboards import router as dashboards_router
+    app.include_router(dashboards_router, prefix="/api/v1")
+    logger.info("✅ Dashboard routes registered")
+except ImportError as e:
+    logger.warning(f"Dashboard routes not available: {e}")
+except Exception as e:
+    logger.warning(f"Error registering dashboard routes: {e}")
 
 # Phase 2-4 REST APIs
 try:

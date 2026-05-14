@@ -187,5 +187,4 @@ class FactShipmentTracking(Base):
     actual_arrival: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
     source_system: Mapped[str] = mapped_column(String(50), nullable=False)
-    inserted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())</content>
-<parameter name="filePath">/home/pp-in-371/RANA/AATREE/exports/india-trade-analytics/backend/app/models/transactions.py
+    inserted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

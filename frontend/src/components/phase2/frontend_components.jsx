@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { api } from '@/lib/api';
 
 // ============================================================================
 // TRANSACTIONS DASHBOARD
@@ -19,13 +20,12 @@ export const TransactionsDashboard = () => {
 
   const fetchTransactions = async () => {
     try {
-      const params = new URLSearchParams();
-      if (filters.exporter_key) params.append('exporter_key', filters.exporter_key);
-      if (filters.country_key) params.append('country_key', filters.country_key);
-      if (filters.hs_code_key) params.append('hs_code_key', filters.hs_code_key);
+      const params = {};
+      if (filters.exporter_key) params.exporter_key = filters.exporter_key;
+      if (filters.country_key) params.country_key = filters.country_key;
+      if (filters.hs_code_key) params.hs_code_key = filters.hs_code_key;
 
-      const response = await fetch(`/api/v1/transactions/exports?${params}`);
-      const data = await response.json();
+      const { data } = await api().get('transactions/exports', { params });
       setTransactions(data);
     } catch (error) {
       console.error('Failed to fetch transactions:', error);
@@ -110,8 +110,7 @@ export const ExportersDashboard = () => {
 
   const fetchExporters = async () => {
     try {
-      const response = await fetch('/api/v1/exporters');
-      const data = await response.json();
+      const { data } = await api().get('exporters');
       setExporters(data);
     } catch (error) {
       console.error('Failed to fetch exporters:', error);
@@ -161,16 +160,16 @@ export const AnalyticsDashboard = () => {
   const fetchAnalytics = async () => {
     try {
       const [summaryRes, transportRes, destRes, hsRes] = await Promise.all([
-        fetch('/api/v1/analytics/summary'),
-        fetch('/api/v1/analytics/by-transport-mode'),
-        fetch('/api/v1/destinations'),
-        fetch('/api/v1/analytics/by-hs-code')
+        api().get('analytics/summary'),
+        api().get('analytics/by-transport-mode'),
+        api().get('destinations'),
+        api().get('analytics/by-hs-code'),
       ]);
 
-      setSummary(await summaryRes.json());
-      setTransportModes(await transportRes.json());
-      setTopDestinations(await destRes.json());
-      setTopHsCodes(await hsRes.json());
+      setSummary(summaryRes.data);
+      setTransportModes(transportRes.data);
+      setTopDestinations(destRes.data);
+      setTopHsCodes(hsRes.data);
     } catch (error) {
       console.error('Failed to fetch analytics:', error);
     } finally {
@@ -262,16 +261,14 @@ export const TrackingDashboard = () => {
     setLoading(true);
     setError('');
     try {
-      const response = await fetch(`/api/v1/tracking/shipment/${transactionId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setTracking(data);
-      } else {
+      const { data } = await api().get(`tracking/shipment/${transactionId}`);
+      setTracking(data);
+    } catch (err) {
+      if (err.response?.status === 404) {
         setError('Shipment tracking not found');
-        setTracking([]);
+      } else {
+        setError('Failed to fetch tracking data');
       }
-    } catch (error) {
-      setError('Failed to fetch tracking data');
       setTracking([]);
     } finally {
       setLoading(false);

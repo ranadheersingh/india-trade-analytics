@@ -31,14 +31,15 @@ def load_sample_data():
             logger.info("Loading Phase 2-4 sample data...")
 
             # Get reference data
+            ind = db.query(DimCountry).filter(DimCountry.iso_alpha_3 == "IND").first()
             usa = db.query(DimCountry).filter(DimCountry.iso_alpha_3 == "USA").first()
             deu = db.query(DimCountry).filter(DimCountry.iso_alpha_3 == "DEU").first()
             chn = db.query(DimCountry).filter(DimCountry.iso_alpha_3 == "CHN").first()
 
-            hs_tea = db.query(DimHsCode).filter(DimHsCode.hs_code.like("0902%")).first()
-            hs_textiles = db.query(DimHsCode).filter(DimHsCode.hs_code.like("5201%")).first()
-            hs_electronics = db.query(DimHsCode).filter(DimHsCode.hs_code.like("8541%")).first()
-            hs_spices = db.query(DimHsCode).filter(DimHsCode.hs_code.like("0904%")).first()
+            hs_tea = db.query(DimHsCode).filter(DimHsCode.hs_code == "09").first()
+            hs_textiles = db.query(DimHsCode).filter(DimHsCode.hs_code == "52").first()
+            hs_electronics = db.query(DimHsCode).filter(DimHsCode.hs_code == "85").first()
+            hs_spices = db.query(DimHsCode).filter(DimHsCode.hs_code == "09").first()
 
             date_2024 = db.query(DimDate).filter(DimDate.calendar_year == 2024).first()
 
@@ -72,28 +73,28 @@ def load_sample_data():
                 iec_code="AXGPK0287Q",  # Real IEC from summary
                 company_name="Test Exporter",
                 city="Mumbai",
-                state_code="MH",
+                state_code="IN-MH",
                 is_active=True
             )
             exporter2 = DimExporter(
                 iec_code="ABCDE1234F",
                 company_name="Apex Textiles",
                 city="Surat",
-                state_code="GJ",
+                state_code="IN-GJ",
                 is_active=True
             )
             exporter3 = DimExporter(
                 iec_code="FGHIJ5678K",
                 company_name="Global Electronics",
                 city="Bangalore",
-                state_code="KA",
+                state_code="IN-KA",
                 is_active=True
             )
             exporter4 = DimExporter(
                 iec_code="KLMNO9012P",
                 company_name="Spice Traders",
                 city="Kochi",
-                state_code="KL",
+                state_code="IN-KL",
                 is_active=True
             )
 
@@ -104,14 +105,14 @@ def load_sample_data():
             mumbai_port = DimPort(
                 port_code="INBOM",
                 port_name="Mumbai Port",
-                country_key=usa.country_key,  # India
+                country_key=ind.country_key,
                 port_type="sea",
                 is_active=True
             )
             delhi_airport = DimPort(
                 port_code="DEL",
                 port_name="Indira Gandhi International Airport",
-                country_key=usa.country_key,
+                country_key=ind.country_key,
                 port_type="air",
                 is_active=True
             )
@@ -278,12 +279,33 @@ def load_sample_data():
             db.add_all(tracking_events)
             db.commit()
 
-            logger.info("✅ Loaded 6 sample export transactions, 4 exporters, 13 transport modes, 4 tracking events")
+            logger.info("✅ Loaded 6 sample export transactions, 4 exporters, 4 transport modes, 5 tracking events")
 
         except Exception as e:
             db.rollback()
             logger.error(f"Failed to load sample data: {e}")
             raise
+
+
+class NiryatPhase2Pipeline:
+    """Thin Pipeline-compatible wrapper around load_sample_data."""
+    name = "niryat_phase2"
+    schedule_cron = None
+
+    async def fetch(self, db):
+        return []
+
+    async def transform(self, db, raw):
+        return raw
+
+    async def load(self, db, rows):
+        return 0
+
+    async def run(self):
+        load_sample_data()
+        from app.ingestion.base import IngestionResult
+        return IngestionResult(source=self.name, status="success",
+                               rows_fetched=0, rows_loaded=0, duration_s=0)
 
 
 if __name__ == "__main__":

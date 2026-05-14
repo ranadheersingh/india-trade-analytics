@@ -6,7 +6,7 @@ import { TrendingUp } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@india-trade.local");
+  const [email, setEmail] = useState("admin@india-trade.com");
   const [password, setPassword] = useState("admin123");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -17,7 +17,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push("/dashboards/executive");
+      router.push("/dashboards/transactions");
     } catch (e: any) {
       setErr(e.response?.data?.detail || e.message || "Login failed");
     } finally {
