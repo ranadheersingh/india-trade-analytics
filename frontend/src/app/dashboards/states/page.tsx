@@ -55,10 +55,16 @@ export default function StatesPage() {
   // FY25 has TRADESTAT export/import split. FY26 currently has DGCIS TOTAL only.
   const [fy, setFy] = useState(2025);
 
+  const { data: availableYears = [2021, 2022, 2023, 2024, 2025, 2026] } = useQuery({
+    queryKey: ["available-years"],
+    queryFn: async () => (await api().get("meta/available-years")).data as number[],
+    staleTime: 60_000,
+  });
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["states", fy],
     queryFn: async () =>
-      (await api().get(`/dashboards/states?fiscal_year=${fy}`)).data,
+      (await api().get(`dashboards/states?fiscal_year=${fy}`)).data,
   });
 
   const displayedFy = data?.fiscal_year ?? fy;
@@ -84,7 +90,7 @@ export default function StatesPage() {
               onChange={(e) => setFy(Number(e.target.value))}
               className="bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm"
             >
-              {[2021, 2022, 2023, 2024, 2025, 2026].map((y) => (
+              {availableYears.map((y) => (
                 <option key={y} value={y}>
                   FY{String(y).slice(-2)}
                 </option>

@@ -6,7 +6,7 @@ from sqlalchemy import select, or_, func
 from app.core.db import get_db
 from app.api.deps import get_current_user
 from app.models import (
-    DimCountry, DimState, DimHsCode, IngestionLog, User,
+    DimCountry, DimState, DimHsCode, DimDate, FactTradeMonthly, IngestionLog, User,
 )
 from app.schemas.meta import CountryOut, StateOut, HsCodeOut, IngestionStatusOut
 
@@ -66,6 +66,22 @@ def list_hs_codes(
         ))
     stmt = stmt.order_by(DimHsCode.hs_code).limit(limit)
     return list(db.execute(stmt).scalars())
+
+
+@router.get("/available-years")
+def available_years(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Return distinct fiscal years that have trade data, newest first."""
+    rows = db.execute(
+        select(DimDate.fiscal_year_in)
+        .join(FactTradeMonthly, FactTradeMonthly.date_key == DimDate.date_key)
+        .where(FactTradeMonthly.value_usd > 0)
+        .group_by(DimDate.fiscal_year_in)
+        .order_by(DimDate.fiscal_year_in.desc())
+    ).scalars().all()
+    return [int(r) for r in rows]
 
 
 @router.get("/ingestion-status", response_model=list[IngestionStatusOut])

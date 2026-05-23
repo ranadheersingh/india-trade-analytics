@@ -27,8 +27,8 @@ class NIRYATAPIClient:
 
     def __init__(self):
         self.base_url = "https://eb-rc.dgft.gov.in"  # Placeholder - actual API URL
-        self.iec_code = settings.DGFT_IEC_CODE or "AXGPK0287Q"  # From summary
-        self.dsc_token = settings.DGFT_DSC_TOKEN  # Requires DSC certificate
+        self.iec_code = settings.dgft_iec_code or "AXGPK0287Q"
+        self.dsc_token = settings.dgft_dsc_token
         self.session = requests.Session()
 
     def authenticate(self) -> bool:

@@ -65,9 +65,15 @@ def deactivate_user(
 
 # ---- Ingestion ----
 
+_EXTRA_SOURCES = [
+    {"name": "niryat_phase2", "schedule": None},
+    {"name": "niryat_real",   "schedule": None},
+]
+
 @router.get("/ingestion/sources")
 def list_sources(_: User = Depends(require_admin)):
-    return [{"name": n, "schedule": cls.schedule_cron} for n, cls in PIPELINES.items()]
+    regular = [{"name": n, "schedule": cls.schedule_cron} for n, cls in PIPELINES.items()]
+    return regular + _EXTRA_SOURCES
 
 @router.post("/ingestion/trigger/{source}")
 async def trigger_ingestion(
@@ -75,7 +81,9 @@ async def trigger_ingestion(
     background: BackgroundTasks,
     _: User = Depends(require_admin),
 ):
-    if source not in PIPELINES:
+    try:
+        get_pipeline(source)  # validate — raises KeyError if unknown
+    except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown source: {source}")
 
     async def _run():
@@ -86,5 +94,5 @@ async def trigger_ingestion(
         except Exception as e:
             logger.exception("[admin] %s failed: %s", source, e)
 
-    background.add_task(_run)   # ← just pass the function
+    background.add_task(_run)
     return {"status": "started", "source": source}

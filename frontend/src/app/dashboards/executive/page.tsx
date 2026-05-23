@@ -10,8 +10,7 @@ import Card from "@/components/ui/Card";
 import KpiCard from "@/components/ui/KpiCard";
 import EChart from "@/components/charts/EChart";
 
-function FYSelect({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const years = [2022, 2023, 2024, 2025, 2026];
+function FYSelect({ value, onChange, years }: { value: number; onChange: (v: number) => void; years: number[] }) {
   return (
     <select
       value={value}
@@ -26,9 +25,15 @@ function FYSelect({ value, onChange }: { value: number; onChange: (v: number) =>
 export default function ExecutivePage() {
   const router = useRouter();
   const [fy, setFy] = useState(2026);
+
+  const { data: availableYears = [2022, 2023, 2024, 2025, 2026] } = useQuery({
+    queryKey: ["available-years"],
+    queryFn: async () => (await api().get("meta/available-years")).data as number[],
+    staleTime: 60_000,
+  });
   const { data, isLoading, error } = useQuery({
     queryKey: ["exec", fy],
-    queryFn: async () => (await api().get(`/dashboards/executive?fiscal_year=${fy}`)).data,
+    queryFn: async () => (await api().get(`dashboards/executive?fiscal_year=${fy}`)).data,
   });
 
   return (
@@ -37,7 +42,7 @@ export default function ExecutivePage() {
         <PageHeader
           title="Executive Overview"
           subtitle="High-level summary of India's merchandise trade"
-          right={<FYSelect value={fy} onChange={setFy} />}
+          right={<FYSelect value={fy} onChange={setFy} years={availableYears} />}
         />
 
         {isLoading && <div className="text-gray-500">Loading…</div>}

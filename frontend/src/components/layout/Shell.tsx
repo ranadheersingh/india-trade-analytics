@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, Globe, MapPin, Boxes, Settings, LogOut, TrendingUp, ClipboardList, Building2, BarChart3, Truck } from "lucide-react";
+import { LayoutDashboard, Globe, MapPin, Boxes, Settings, LogOut, TrendingUp, ClipboardList, Building2, BarChart3, Truck, PackageSearch, UserCircle, LineChart, AlertTriangle } from "lucide-react";
 import { getMe, logout } from "@/lib/api";
 
 const navSections = [
@@ -13,15 +13,24 @@ const navSections = [
       { href: "/dashboards/country",   label: "Country Analysis",   icon: Globe },
       { href: "/dashboards/states",    label: "State Performance",  icon: MapPin },
       { href: "/dashboards/sector",    label: "Sector Deep-dive",   icon: Boxes },
+      { href: "/dashboards/forecast",   label: "Forecast",           icon: LineChart },
+      { href: "/dashboards/anomaly",    label: "Anomaly Detection",  icon: AlertTriangle },
     ],
   },
   {
     label: "Transactions",
     links: [
       { href: "/dashboards/transactions", label: "Export Transactions", icon: ClipboardList },
+      { href: "/dashboards/imports",      label: "Import Transactions", icon: PackageSearch },
       { href: "/dashboards/exporters",    label: "Exporters",           icon: Building2 },
       { href: "/dashboards/analytics",    label: "Trade Analytics",     icon: BarChart3 },
       { href: "/dashboards/tracking",     label: "Shipment Tracking",   icon: Truck },
+    ],
+  },
+  {
+    label: "My Trade",
+    links: [
+      { href: "/dashboards/my-exports", label: "My Exports", icon: UserCircle },
     ],
   },
   {

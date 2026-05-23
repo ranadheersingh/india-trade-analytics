@@ -122,6 +122,26 @@ except ImportError as e:
 except Exception as e:
     logger.warning(f"Error registering Phase 2-4 APIs: {e}")
 
+# Forecast API
+try:
+    from app.api.v1.forecast import router as forecast_router
+    app.include_router(forecast_router, prefix="/api/v1")
+    logger.info("✅ Forecast API registered")
+except ImportError as e:
+    logger.warning(f"Forecast API not available: {e}")
+except Exception as e:
+    logger.warning(f"Error registering Forecast API: {e}")
+
+# Anomaly Detection API
+try:
+    from app.api.v1.anomaly import router as anomaly_router
+    app.include_router(anomaly_router, prefix="/api/v1")
+    logger.info("✅ Anomaly Detection API registered")
+except ImportError as e:
+    logger.warning(f"Anomaly Detection API not available: {e}")
+except Exception as e:
+    logger.warning(f"Error registering Anomaly Detection API: {e}")
+
 # ============================================================================
 # HEALTH CHECK
 # ============================================================================

@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     exchangerate_api_key: str = ""
     comtrade_api_key: str = ""
 
+    # DGFT / eBRC API (requires IEC + DSC certificate)
+    dgft_iec_code: str = "AXGPK0287Q"
+    dgft_dsc_token: str = ""
+
     @property
     def database_url(self) -> str:
         return (

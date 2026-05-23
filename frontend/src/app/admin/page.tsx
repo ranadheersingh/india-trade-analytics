@@ -14,29 +14,29 @@ export default function AdminPage() {
 
   const { data: sources } = useQuery({
     queryKey: ["sources"],
-    queryFn: async () => (await api().get("/admin/ingestion/sources")).data,
+    queryFn: async () => (await api().get("admin/ingestion/sources")).data,
   });
 
   const { data: status, refetch: refetchStatus } = useQuery({
     queryKey: ["ingestion-status"],
-    queryFn: async () => (await api().get("/meta/ingestion-status")).data,
+    queryFn: async () => (await api().get("meta/ingestion-status")).data,
     refetchInterval: 5000,
   });
 
   const { data: users, refetch: refetchUsers } = useQuery({
     queryKey: ["users"],
-    queryFn: async () => (await api().get("/admin/users")).data,
+    queryFn: async () => (await api().get("admin/users")).data,
   });
 
   const trigger = useMutation({
-    mutationFn: (source: string) => api().post(`/admin/ingestion/trigger/${source}`),
+    mutationFn: (source: string) => api().post(`admin/ingestion/trigger/${source}`),
     onSuccess: () => {
       setTimeout(() => refetchStatus(), 1000);
     },
   });
 
   const createUser = useMutation({
-    mutationFn: (u: typeof newUser) => api().post("/admin/users", u),
+    mutationFn: (u: typeof newUser) => api().post("admin/users", u),
     onSuccess: () => {
       setNewUser({ email: "", password: "", full_name: "", role: "viewer" });
       setShowAdd(false);

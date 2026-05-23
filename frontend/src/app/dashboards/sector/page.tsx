@@ -28,12 +28,18 @@ function SectorPage() {
 
   const { data: hsList } = useQuery({
     queryKey: ["hs"],
-    queryFn: async () => (await api().get("/meta/hs?level=2&limit=200")).data,
+    queryFn: async () => (await api().get("meta/hs?level=2&limit=200")).data,
+  });
+
+  const { data: availableYears = [2022, 2023, 2024, 2025, 2026] } = useQuery({
+    queryKey: ["available-years"],
+    queryFn: async () => (await api().get("meta/available-years")).data as number[],
+    staleTime: 60_000,
   });
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["sector", hs, fy],
-    queryFn: async () => (await api().get(`/dashboards/sector/${hs}?fiscal_year=${fy}`)).data,
+    queryFn: async () => (await api().get(`dashboards/sector/${hs}?fiscal_year=${fy}`)).data,
     enabled: !!hs,
   });
 
@@ -59,7 +65,7 @@ function SectorPage() {
               onChange={e => setFy(Number(e.target.value))}
               className="bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm"
             >
-              {[2022, 2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>FY{String(y).slice(-2)}</option>)}
+              {availableYears.map(y => <option key={y} value={y}>FY{String(y).slice(-2)}</option>)}
             </select>
           }
         />

@@ -53,7 +53,7 @@ export default function StateDetailPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["state-detail", stateCode, requestedFy],
     queryFn: async () =>
-      (await api().get(`/dashboards/states/${stateCode}?fiscal_year=${requestedFy}`)).data,
+      (await api().get(`dashboards/states/${stateCode}?fiscal_year=${requestedFy}`)).data,
     enabled: !!stateCode,
   });
 

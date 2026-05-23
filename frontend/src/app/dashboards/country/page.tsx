@@ -29,12 +29,18 @@ function CountryPage() {
 
   const { data: countries } = useQuery({
     queryKey: ["countries"],
-    queryFn: async () => (await api().get("/meta/countries?limit=500")).data,
+    queryFn: async () => (await api().get("meta/countries?limit=500")).data,
+  });
+
+  const { data: availableYears = [2022, 2023, 2024, 2025, 2026] } = useQuery({
+    queryKey: ["available-years"],
+    queryFn: async () => (await api().get("meta/available-years")).data as number[],
+    staleTime: 60_000,
   });
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["country", iso, fy],
-    queryFn: async () => (await api().get(`/dashboards/country/${iso}?fiscal_year=${fy}`)).data,
+    queryFn: async () => (await api().get(`dashboards/country/${iso}?fiscal_year=${fy}`)).data,
     enabled: !!iso,
   });
 
@@ -63,7 +69,7 @@ function CountryPage() {
                 onChange={e => setFy(Number(e.target.value))}
                 className="bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm"
               >
-                {[2022, 2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>FY{String(y).slice(-2)}</option>)}
+                {availableYears.map(y => <option key={y} value={y}>FY{String(y).slice(-2)}</option>)}
               </select>
             </div>
           }

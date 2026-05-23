@@ -19,6 +19,8 @@ dependencies = [
     "tenacity==9.0.0",
     "slowapi==0.1.9",
     "email-validator==2.2.0",
+    "numpy>=1.26",
+    "statsmodels>=0.14",
 ]
 
 [project.optional-dependencies]
