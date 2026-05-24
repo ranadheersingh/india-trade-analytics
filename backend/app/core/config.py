@@ -32,9 +32,13 @@ class Settings(BaseSettings):
     exchangerate_api_key: str = ""
     comtrade_api_key: str = ""
 
-    # DGFT / eBRC API (requires IEC + DSC certificate)
+    # DGFT eBRC API (Services > eBRC > API Credential on dgft.gov.in)
     dgft_iec_code: str = "AXGPK0287Q"
-    dgft_dsc_token: str = ""
+    dgft_client_id: str = ""
+    dgft_client_secret: str = ""
+    dgft_x_api_key: str = ""
+    dgft_private_key: str = ""   # userprivateKey (PKCS8 DER, base64) from credentials*.txt
+    dgft_public_key: str = ""    # dgftpublicKey (X509 DER, base64) from credentials*.txt — needed for secretVal
 
     @property
     def database_url(self) -> str:

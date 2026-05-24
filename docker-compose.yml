@@ -41,9 +41,14 @@ services:
       EXCHANGERATE_API_KEY: ${EXCHANGERATE_API_KEY:-}
       COMTRADE_API_KEY: ${COMTRADE_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      # DGCIS pipeline mode: 'backfill' for one-shot historical load (60 months),
-      # 'incremental' for daily refresh of last 2 months. Defaults to incremental.
       DGCIS_MODE: ${DGCIS_MODE:-incremental}
+      # DGFT eBRC API credentials
+      DGFT_IEC_CODE: ${DGFT_IEC_CODE:-AXGPK0287Q}
+      DGFT_CLIENT_ID: ${DGFT_CLIENT_ID:-}
+      DGFT_CLIENT_SECRET: ${DGFT_CLIENT_SECRET:-}
+      DGFT_X_API_KEY: ${DGFT_X_API_KEY:-}
+      DGFT_PRIVATE_KEY: ${DGFT_PRIVATE_KEY:-}
+      DGFT_PUBLIC_KEY: ${DGFT_PUBLIC_KEY:-}
     volumes:
       - ./data:/app/data
       - ./backend/app/data:/app/app/data

@@ -33,17 +33,40 @@ def get_pipeline(name: str) -> Pipeline:
         from app.ingestion.niryat_phase2 import NiryatPhase2Pipeline
         return NiryatPhase2Pipeline()
     
-    # Special case: NIRYAT Real (government API)
+    # Special case: NIRYAT Real (DGFT eBRC API — needs credentials in .env)
     if name == "niryat_real":
-        try:
-            from app.ingestion.niryat_real_data import RealNiryatDataLoader
-            import os
-            return RealNiryatDataLoader(
-                api_key=os.getenv("NIRYAT_API_KEY", ""),
-                api_base=os.getenv("NIRYAT_API_BASE", "https://niryat.commerce.gov.in/api/v1")
-            )
-        except ImportError:
-            raise KeyError(f"Real NIRYAT pipeline not available. Available: {list(PIPELINES.keys())}")
+        from app.ingestion.niryat_real_data import NIRYATDataLoader
+
+        class _NiryatRealPipeline(Pipeline):
+            name = "niryat_real"
+            schedule_cron = None
+
+            async def fetch(self, db) -> list[dict]:
+                from app.core.config import get_settings
+                import asyncio
+                s = get_settings()
+                if not s.dgft_x_api_key:
+                    return []  # no credentials configured
+                loader = NIRYATDataLoader()
+                from datetime import date, timedelta
+                to_d = date.today()
+                return await asyncio.to_thread(
+                    loader.api_client.get_export_data, to_d - timedelta(days=30), to_d
+                ) or []
+
+            async def transform(self, db, raw: list[dict]) -> list[dict]:
+                return raw
+
+            async def load(self, db, rows: list[dict]) -> int:
+                if not rows:
+                    return 0
+                loader = NIRYATDataLoader()
+                for record in rows:
+                    loader._load_export_record(db, record)
+                db.commit()
+                return len(rows)
+
+        return _NiryatRealPipeline()
     
     # Regular pipelines
     cls = PIPELINES.get(name)

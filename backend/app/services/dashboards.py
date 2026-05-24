@@ -51,6 +51,35 @@ def _kpi_pair(value_curr: float, value_prev: float, label: str) -> KpiCard:
     )
 
 
+def _latest_fy_with_data(db: Session, requested_fy: Optional[int] = None) -> int:
+    """Return requested FY if global trade data exists; otherwise latest FY with data."""
+    if requested_fy:
+        count_rows = db.execute(
+            select(func.count())
+            .select_from(FactTradeMonthly)
+            .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+            .where(
+                FactTradeMonthly.direction.in_(["EXPORT", "IMPORT"]),
+                FactTradeMonthly.value_usd > 0,
+                DimDate.fiscal_year_in == requested_fy,
+            )
+        ).scalar_one()
+        if count_rows and count_rows > 0:
+            return int(requested_fy)
+
+    latest_fy = db.execute(
+        select(func.max(DimDate.fiscal_year_in))
+        .select_from(FactTradeMonthly)
+        .join(DimDate, FactTradeMonthly.date_key == DimDate.date_key)
+        .where(
+            FactTradeMonthly.direction.in_(["EXPORT", "IMPORT"]),
+            FactTradeMonthly.value_usd > 0,
+        )
+    ).scalar_one()
+
+    return int(latest_fy or requested_fy or DateWindow.current_fy())
+
+
 def _latest_fy_with_state_data(
     db: Session,
     requested_fy: Optional[int] = None,
@@ -148,7 +177,7 @@ def _clean_region_name(region: str | None) -> str:
 # ---------------------------------------------------------------------
 
 def get_executive_overview(db: Session, fiscal_year: Optional[int] = None) -> ExecutiveOverview:
-    fy = fiscal_year or DateWindow.current_fy()
+    fy = _latest_fy_with_data(db, fiscal_year)
     fy_prev = fy - 1
 
     def total_value(direction: str, year: int) -> float:
@@ -294,7 +323,7 @@ def get_executive_overview(db: Session, fiscal_year: Optional[int] = None) -> Ex
 # ---------------------------------------------------------------------
 
 def get_country_detail(db: Session, iso3: str, fiscal_year: Optional[int] = None) -> CountryDetail:
-    fy = fiscal_year or DateWindow.current_fy()
+    fy = _latest_fy_with_data(db, fiscal_year)
     fy_prev = fy - 1
 
     country = db.execute(
@@ -798,7 +827,7 @@ def get_state_detail(db: Session, state_code: str, fiscal_year: Optional[int] = 
 # ---------------------------------------------------------------------
 
 def get_sector_detail(db: Session, hs_2: str, fiscal_year: Optional[int] = None) -> SectorDetail:
-    fy = fiscal_year or DateWindow.current_fy()
+    fy = _latest_fy_with_data(db, fiscal_year)
     fy_prev = fy - 1
 
     hs_row = db.execute(

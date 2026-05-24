@@ -2,8 +2,16 @@
 const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
-  env: {
-    NEXT_PUBLIC_API_BASE: process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:8001/api/v1',
+  // Proxy /api/v1/* → backend container so the browser never calls :8001
+  // directly. Works from any IP/hostname — localhost, LAN, remote server.
+  async rewrites() {
+    const backendUrl = process.env.BACKEND_INTERNAL_URL || 'http://trade_backend:8000';
+    return [
+      {
+        source: '/api/v1/:path*',
+        destination: `${backendUrl}/api/v1/:path*`,
+      },
+    ];
   },
 };
 

@@ -68,7 +68,7 @@ def _compute_anomalies(values: list[float]) -> list[dict]:
         z = (v - mean) / std
         iqr_flag = v < iqr_lo or v > iqr_hi
 
-        is_anomaly = abs(z) >= Z_THRESHOLD or (iqr_flag and abs(z) >= 1.5)
+        is_anomaly = bool(abs(z) >= Z_THRESHOLD or (iqr_flag and abs(z) >= 1.5))
         anomaly_type = None
         if is_anomaly:
             anomaly_type = "spike" if z > 0 else "dip"

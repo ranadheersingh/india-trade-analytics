@@ -2,7 +2,9 @@
 
 import axios, { AxiosInstance } from "axios";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8001/api/v1";
+// Relative URL — requests go through the Next.js proxy rewrite to the backend.
+// Works from any IP/hostname; browser never needs direct access to :8001.
+const API_BASE = "/api/v1";
 
 let cachedClient: AxiosInstance | null = null;
 
